@@ -47,4 +47,7 @@ export class User extends Model {
   @Default(true)
   @Column(DataType.BOOLEAN)
   declare isDefaultPassword: boolean;
+
+  declare createdAt: Date;
+  declare updatedAt: Date;
 }
