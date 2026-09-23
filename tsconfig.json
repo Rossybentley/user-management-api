@@ -13,6 +13,7 @@
     "allowJs": true,
     "checkJs": false,
     "target": "ES2022",
+    "types": ["node", "jest"],
     "sourceMap": true,
     "outDir": "./dist",
     "incremental": true,
@@ -25,6 +26,6 @@
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
   },
-  "include": ["src/**/*.ts", "database/**/*.js"],
+  "include": ["src/**/*.ts", "test/**/*.ts", "database/**/*.js"],
   "exclude": ["node_modules", "dist"]
 }

@@ -31,6 +31,10 @@ export class UsersService implements OnModuleInit {
     });
   }
 
+  async findById(id: string): Promise<User | null> {
+    return this.userModel.findByPk(id);
+  }
+
   async create(createUserDto: CreateUserDto): Promise<{
     user: User;
     temporaryPassword: string;
