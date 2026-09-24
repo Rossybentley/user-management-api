@@ -1,4 +1,9 @@
-import { ConflictException, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Injectable,
+  OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/sequelize';
 
@@ -19,10 +24,26 @@ export class UsersService implements OnModuleInit {
     private readonly configService: ConfigService,
   ) {}
 
+  /**
+   * Runs automatically when Nest initializes this provider.
+   *
+   * We use it to make sure the application has its initial
+   * Super Admin account.
+   */
   async onModuleInit(): Promise<void> {
     await this.seedSuperAdmin();
   }
 
+  /**
+   * Find a user by email.
+   *
+   * Email is normalized before querying so:
+   *
+   * USER@example.com
+   * user@example.com
+   *
+   * are treated consistently by our application.
+   */
   async findByEmail(email: string): Promise<User | null> {
     return this.userModel.findOne({
       where: {
@@ -31,24 +52,65 @@ export class UsersService implements OnModuleInit {
     });
   }
 
+  /**
+   * Find a user using their primary key.
+   *
+   * JwtStrategy uses this after extracting the user ID
+   * from the JWT "sub" claim.
+   */
   async findById(id: string): Promise<User | null> {
     return this.userModel.findByPk(id);
   }
 
-  async create(createUserDto: CreateUserDto): Promise<{
+  /**
+   * Create a new user.
+   *
+   * createUserDto = the account we want to create.
+   *
+   * actor = the currently authenticated user performing
+   * the operation.
+   */
+  async create(
+    createUserDto: CreateUserDto,
+    actor?: User,
+  ): Promise<{
     user: User;
     temporaryPassword: string;
   }> {
+    /**
+     * If this method was called through our authenticated
+     * HTTP endpoint, check what role the actor is allowed
+     * to create.
+     */
+    if (actor) {
+      this.validateRoleCreation(actor.role, createUserDto.role);
+    }
+
     const normalizedEmail = createUserDto.email.trim().toLowerCase();
 
+    /**
+     * Application-level duplicate check.
+     *
+     * The database UNIQUE constraint is still our final
+     * protection against duplicate emails.
+     */
     const existingUser = await this.findByEmail(normalizedEmail);
 
     if (existingUser) {
       throw new ConflictException('A user with this email already exists');
     }
 
+    /**
+     * Generate a temporary password.
+     *
+     * Later, our invitation/change-password flow will
+     * allow the user to replace this password.
+     */
     const temporaryPassword = this.generateTemporaryPassword();
 
+    /**
+     * Never store plaintext passwords.
+     */
     const hashedPassword = await bcrypt.hash(temporaryPassword, SALT_ROUNDS);
 
     const user = await this.userModel.create({
@@ -57,6 +119,11 @@ export class UsersService implements OnModuleInit {
       email: normalizedEmail,
       password: hashedPassword,
       role: createUserDto.role,
+
+      /**
+       * Admin-created accounts must change their password
+       * before normal login is allowed.
+       */
       isDefaultPassword: true,
     });
 
@@ -66,10 +133,48 @@ export class UsersService implements OnModuleInit {
     };
   }
 
+  /**
+   * Generate a cryptographically random temporary password.
+   */
   private generateTemporaryPassword(): string {
     return randomBytes(12).toString('base64url');
   }
 
+  /**
+   * Authorization policy for creating users.
+   *
+   * SUPER_ADMIN:
+   * - can create ADMIN
+   * - can create AUTHOR
+   *
+   * ADMIN:
+   * - can create AUTHOR
+   * - cannot create ADMIN
+   *
+   * No one can create another SUPER_ADMIN through
+   * POST /users.
+   */
+  private validateRoleCreation(
+    actorRole: UserRole,
+    targetRole: UserRole,
+  ): void {
+    if (targetRole === UserRole.SUPER_ADMIN) {
+      throw new ForbiddenException(
+        'Super Admin accounts cannot be created through this endpoint',
+      );
+    }
+
+    if (actorRole === UserRole.ADMIN && targetRole === UserRole.ADMIN) {
+      throw new ForbiddenException(
+        'Only a Super Admin can create Admin accounts',
+      );
+    }
+  }
+
+  /**
+   * Creates the initial Super Admin when the application
+   * starts if the configured account does not already exist.
+   */
   private async seedSuperAdmin(): Promise<void> {
     const firstname = this.configService.get<string>('SUPER_ADMIN_FIRSTNAME');
 
@@ -85,6 +190,12 @@ export class UsersService implements OnModuleInit {
 
     const normalizedEmail = email.trim().toLowerCase();
 
+    /**
+     * Makes the seed operation idempotent.
+     *
+     * Restarting the application won't create another
+     * account with the same configured email.
+     */
     const existingSuperAdmin = await this.findByEmail(normalizedEmail);
 
     if (existingSuperAdmin) {
@@ -99,6 +210,11 @@ export class UsersService implements OnModuleInit {
       email: normalizedEmail,
       password: hashedPassword,
       role: UserRole.SUPER_ADMIN,
+
+      /**
+       * Bootstrap Super Admin already has an explicit
+       * password configured through the environment.
+       */
       isDefaultPassword: false,
     });
 
