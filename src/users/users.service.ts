@@ -9,7 +9,8 @@ import { InjectModel } from '@nestjs/sequelize';
 
 import * as bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
-
+import { MailService } from '../mail/mail.service';
+import { TokenService } from '../auth/services/token.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { UserRole } from './enums/user-role.enum';
 import { User } from './models/user.model';
@@ -22,6 +23,8 @@ export class UsersService implements OnModuleInit {
     @InjectModel(User)
     private readonly userModel: typeof User,
     private readonly configService: ConfigService,
+    private readonly mailService: MailService,
+    private readonly tokenService: TokenService,
   ) {}
 
   /**
@@ -62,6 +65,14 @@ export class UsersService implements OnModuleInit {
     return this.userModel.findByPk(id);
   }
 
+  async updatePassword(user: User, hashedPassword: string): Promise<User> {
+    user.password = hashedPassword;
+    user.isDefaultPassword = false;
+
+    await user.save();
+
+    return user;
+  }
   /**
    * Create a new user.
    *
@@ -127,6 +138,20 @@ export class UsersService implements OnModuleInit {
       isDefaultPassword: true,
     });
 
+    const invitationToken = this.tokenService.createInvitationToken(
+      user.id,
+      user.email,
+    );
+
+    const frontendUrl = this.configService.getOrThrow<string>('FRONTEND_URL');
+
+    const invitationUrl = `${frontendUrl}/change-password?token=${encodeURIComponent(invitationToken)}`;
+
+    await this.mailService.sendWelcomeEmail(
+      user.email,
+      user.firstname,
+      invitationUrl,
+    );
     return {
       user,
       temporaryPassword,

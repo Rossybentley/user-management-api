@@ -9,10 +9,12 @@ import { AdminGuard } from './guards/admin.guard';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { LocalStrategy } from './strategies/local.strategy';
+import { TokenModule } from './token.module';
 
 @Module({
   imports: [
     UsersModule,
+    TokenModule,
 
     PassportModule,
 
